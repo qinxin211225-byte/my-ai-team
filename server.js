@@ -47,6 +47,34 @@ function hasCommand(cmd) {
     return false;
   }
 }
+// 双击启动时终端常常找不到这些命令：把常见的安装位置补进 PATH
+function extendPath() {
+  const home = os.homedir();
+  const sep = process.platform === 'win32' ? ';' : ':';
+  const dirs = [
+    path.dirname(process.execPath), // 正在运行的这个 node 所在的目录
+    path.join(home, '.local', 'bin'),
+    path.join(home, '.npm-global', 'bin'),
+    path.join(home, '.volta', 'bin'),
+    path.join(home, '.bun', 'bin'),
+    '/opt/homebrew/bin',
+    '/usr/local/bin',
+    '/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS',
+    '/Applications/Codex.app/Contents/Resources',
+  ];
+  if (process.platform === 'win32' && process.env.APPDATA) dirs.push(path.join(process.env.APPDATA, 'npm'));
+  // nvm 等装在 ~/.nvm/versions/node/*/bin
+  for (const base of [path.join(home, '.nvm', 'versions', 'node')]) {
+    try {
+      for (const v of fs.readdirSync(base)) dirs.push(path.join(base, v, 'bin'));
+    } catch {}
+  }
+  const cur = (process.env.PATH || '').split(sep);
+  const add = dirs.filter((d) => d && !cur.includes(d) && fs.existsSync(d));
+  process.env.PATH = [...cur, ...add].join(sep);
+}
+extendPath();
+
 function detect() {
   for (const m of members) {
     m.installed = hasCommand(m.command);
@@ -170,8 +198,13 @@ function transcript(limit = 40, per = 1800) {
     })
     .join('\n\n');
 }
+function usable(m) {
+  return !m.online || !m.lastTest || m.lastTest.ok;
+}
 function roster() {
-  return members.map((m) => `- id: ${m.id}｜${m.name}｜角色：${m.role}｜擅长：${m.strengths}｜短板：${m.weaknesses}`).join('\n');
+  return members
+    .map((m) => `- id: ${m.id}｜${m.name}｜角色：${m.role}｜擅长：${m.strengths}｜短板：${m.weaknesses}` + (usable(m) ? '' : '｜【现在接不通，不要派活给他，把他的活交给别人】'))
+    .join('\n');
 }
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -337,6 +370,15 @@ function errText(m, e) {
   return `${m.name} 出错了：${msg}` + (login ? `。看起来还没登录：在终端运行「${m.login || m.command}」登录，然后点左下角的成员打开「团队体检」测试。` : '');
 }
 
+// 真实干活的结果顺手记成"体检结果"：失败的成员显示没接通，项目经理不再派活给他
+function markHealth(m, ok, err) {
+  if (!m.online) return;
+  const was = m.lastTest && m.lastTest.ok;
+  if (ok && was) return;
+  m.lastTest = ok ? { ok: true, text: '刚刚干活正常', at: Date.now() } : { ok: false, text: clip(err || '出错了', 300), at: Date.now() };
+  broadcastTeam();
+}
+
 // ---------- 干活 ----------
 async function runMember(m, prompt, title, row) {
   const node = addNode({ lane: m.id, title, status: 'running', row });
@@ -357,6 +399,7 @@ async function runMember(m, prompt, title, row) {
   };
   try {
     const text = await call(m, prompt, 'agent', onPartial);
+    markHealth(m, true);
     setTyping(m.id, false);
     if (msg) patchMessage(msg.id, { text: text || msg.text || '（没有返回内容）', streaming: false });
     else msg = addMessage({ from: m.id, text: text || '（没有返回内容）', demo: !m.online, task: title });
@@ -364,6 +407,7 @@ async function runMember(m, prompt, title, row) {
   } catch (e) {
     setTyping(m.id, false);
     if (msg) patchMessage(msg.id, { streaming: false });
+    markHealth(m, false, e.message);
     msg = addMessage({ from: 'system', kind: 'system', text: errText(m, e) });
     patchNode(node.id, { status: 'failed', msgId: msg.id });
   }
@@ -377,6 +421,7 @@ async function pmLoop() {
       raw = await call(pm, pmPrompt(), 'pm');
     } catch (e) {
       setTyping(pm.id, false);
+      markHealth(pm, false, e.message);
       addMessage({ from: 'system', kind: 'system', text: errText(pm, e) });
       return;
     }
