@@ -1,0 +1,43 @@
+{
+  "pm": "claude",
+  "timeoutSec": 300,
+  "maxAutoSteps": 8,
+  "members": [
+    {
+      "id": "claude",
+      "name": "Claude",
+      "role": "项目经理",
+      "avatar": "Cl",
+      "color": "#C2410C",
+      "mention": ["claude", "克劳德"],
+      "strengths": "理解需求、拆解任务、对比取舍、把关质量",
+      "weaknesses": "有时偏保守，点子不够野",
+      "command": "claude",
+      "args": ["-p"]
+    },
+    {
+      "id": "gemini",
+      "name": "Gemini",
+      "role": "出点子",
+      "avatar": "Ge",
+      "color": "#1D4ED8",
+      "mention": ["gemini"],
+      "strengths": "发散思维、想角度、出选题和创意",
+      "weaknesses": "容易发散，落地细节不够",
+      "command": "gemini",
+      "args": []
+    },
+    {
+      "id": "gpt",
+      "name": "GPT",
+      "role": "执行",
+      "avatar": "GP",
+      "color": "#047857",
+      "mention": ["gpt", "codex"],
+      "strengths": "执行稳、写脚本写代码、结构清楚",
+      "weaknesses": "不太主动提新想法",
+      "command": "codex",
+      "args": ["exec", "--skip-git-repo-check", "--output-last-message", "{OUT}", "-"]
+    }
+  ]
+}

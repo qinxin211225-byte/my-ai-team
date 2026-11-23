@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>我的 AI 团队</title>
+<style>
+  :root{
+    --bg:#F7F6F3; --panel:#FFFFFF; --line:#ECEAE5; --line2:#E2DFD8; --ink:#1A1918; --muted:#66625C; --faint:#8A857D;
+    --hover:#F2F0EC; --mine:#F1EFEA;
+    --boss:#D97706; --boss-bg:#FFFAF0; --boss-ink:#92400E;
+    --ok:#047857; --ok-bg:#EEF8F3;
+    --r:14px;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.6 "PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  button{font:inherit;color:inherit;cursor:pointer;background:none;border:0}
+  svg{flex:none}
+  .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+  .app{display:grid;grid-template-columns:252px minmax(0,1fr) 440px;height:100vh}
+  .app.noflow{grid-template-columns:252px minmax(0,1fr)}
+  .app.noflow .flow{display:none}
+
+  /* 左侧栏 */
+  .side{background:var(--bg);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:16px 12px;gap:6px;min-height:0}
+  .brand{display:flex;align-items:center;gap:10px;padding:4px 8px 12px;font-weight:700;font-size:16px}
+  .mark{width:28px;height:28px;border-radius:8px;background:var(--ink);color:#fff;display:grid;place-items:center}
+  .newbtn{display:flex;align-items:center;gap:8px;min-height:44px;padding:0 12px;border-radius:12px;background:var(--panel);border:1px solid var(--line2);font-weight:600}
+  .newbtn:hover{background:var(--hover)}
+  .newbtn:disabled{opacity:.5;cursor:not-allowed}
+  .sect{font-size:12px;color:var(--faint);padding:14px 8px 4px}
+  .tasks{overflow-y:auto;min-height:0;flex:1;display:flex;flex-direction:column;gap:2px}
+  .task{display:flex;align-items:center;gap:8px;width:100%;text-align:left;min-height:40px;padding:6px 10px;border-radius:10px;font-size:13px}
+  .task:hover{background:var(--hover)}
+  .task.active{background:var(--panel);box-shadow:0 0 0 1px var(--line2)}
+  .task .tt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sdot{width:8px;height:8px;border-radius:50%;background:#C9C4BB;flex:none}
+  .sdot.live{background:#2563EB}.sdot.wait{background:var(--boss)}.sdot.fin{background:var(--ok)}
+  .teamlist{display:flex;flex-direction:column;gap:2px}
+  .tm{display:flex;align-items:center;gap:10px;padding:6px 8px;border-radius:10px;font-size:13px}
+  .tm .nm{flex:1;min-width:0}
+  .tm .rl{color:var(--faint);font-size:12px}
+  .pill{font-size:11px;border-radius:999px;padding:1px 8px;white-space:nowrap}
+  .pill.on{color:var(--ok);background:var(--ok-bg)}.pill.off{color:var(--muted);background:#EFEDE8}
+  .rulesbtn{display:flex;align-items:center;gap:8px;min-height:40px;padding:0 10px;border-radius:10px;font-size:13px;color:var(--muted);margin-top:4px}
+  .rulesbtn:hover{background:var(--hover);color:var(--ink)}
+
+  .av{width:28px;height:28px;border-radius:8px;color:#fff;display:grid;place-items:center;font-size:11px;font-weight:700;flex:none;letter-spacing:.02em}
+
+  /* 中间对话 */
+  .main{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--panel)}
+  .top{display:flex;align-items:center;gap:10px;padding:12px 20px;border-bottom:1px solid var(--line);min-height:60px}
+  .top .title{font-weight:700;font-size:15px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .chipst{font-size:12px;border-radius:999px;padding:2px 10px;white-space:nowrap}
+  .chipst.live{color:#1E40AF;background:#EEF3FE}.chipst.wait{color:var(--boss-ink);background:#FEF3C7}.chipst.fin{color:var(--ok);background:var(--ok-bg)}.chipst.idle{color:var(--muted);background:#F1EFEA}
+  .iconbtn{display:inline-flex;align-items:center;gap:6px;min-height:40px;min-width:40px;justify-content:center;padding:0 10px;border-radius:10px;color:var(--muted);font-size:13px}
+  .iconbtn:hover{background:var(--hover);color:var(--ink)}
+  .iconbtn[aria-pressed="true"]{color:var(--ink);background:var(--hover)}
+  .menubtn{display:none}
+  .note{margin:12px auto 0;width:min(760px,calc(100% - 40px));padding:10px 14px;border-radius:12px;background:#FFF8E6;color:var(--boss-ink);font-size:13px}
+  .scroll{flex:1;overflow-y:auto;min-height:0}
+  .msgs{width:min(760px,calc(100% - 40px));margin:0 auto;padding:24px 0 12px;display:flex;flex-direction:column;gap:22px}
+
+  .m{display:flex;gap:12px;align-items:flex-start}
+  .m .body{min-width:0;flex:1}
+  .who{display:flex;align-items:center;flex-wrap:wrap;gap:6px;font-size:13px;margin-bottom:2px}
+  .who b{font-weight:700}
+  .who .rl{color:var(--faint)}
+  .tag{font-size:11px;color:var(--muted);background:#F1EFEA;border-radius:6px;padding:0 7px}
+  .txt{word-break:break-word;line-height:1.75}
+  .txt code{background:#F1EFEA;border-radius:5px;padding:0 5px;font-size:13px}
+  .m.me{justify-content:flex-end}
+  .m.me .bubble{max-width:78%;background:var(--mine);border-radius:18px 18px 4px 18px;padding:10px 16px;line-height:1.75;word-break:break-word}
+  .sys{align-self:center;font-size:12px;color:#991B1B;background:#FEF2F2;border-radius:10px;padding:6px 12px;max-width:100%}
+
+  .card{margin-top:8px;border:1.5px solid var(--boss);background:var(--boss-bg);border-radius:16px;padding:16px 18px}
+  .card .hd{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:var(--boss-ink);margin-bottom:8px}
+  .card h3{margin:0 0 10px;font-size:17px;line-height:1.5}
+  .card ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;font-size:13px}
+  .card li{display:flex;gap:8px;align-items:baseline}
+  .card li .k{flex:none;font-size:12px;font-weight:700;border-radius:6px;padding:0 7px;color:#fff}
+  .card li .k.no{background:#EFEDE8;color:var(--muted)}
+  .card li .k.bk{background:#FDECC8;color:var(--boss-ink)}
+  .acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+  .btn{min-height:44px;padding:0 18px;border-radius:12px;border:1px solid var(--line2);background:#fff;font-weight:600}
+  .btn:hover{background:var(--hover)}
+  .btn.primary{background:var(--ink);border-color:var(--ink);color:#fff}
+  .btn.primary:hover{background:#33312E}
+  .resolved{display:flex;align-items:center;gap:6px;margin-top:12px;font-weight:700;color:var(--ok);font-size:13px}
+  .deliver{margin-top:8px;border:1.5px solid #9BD3BC;background:#F6FBF8;border-radius:16px;padding:14px 18px}
+  .deliver .hd{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--ok);margin-bottom:6px}
+
+  .typing{width:min(760px,calc(100% - 40px));margin:0 auto;min-height:28px;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+  .dots{display:inline-flex;gap:3px}
+  .dots i{width:5px;height:5px;border-radius:50%;background:var(--faint);animation:b 1.2s infinite}
+  .dots i:nth-child(2){animation-delay:.15s}.dots i:nth-child(3){animation-delay:.3s}
+  @keyframes b{0%,60%,100%{opacity:.3;transform:translateY(0)}30%{opacity:1;transform:translateY(-2px)}}
+  .minis{display:inline-flex}
+  .minis .av{width:20px;height:20px;border-radius:6px;font-size:9px;margin-right:-4px;box-shadow:0 0 0 2px #fff}
+
+  .composer{width:min(760px,calc(100% - 40px));margin:4px auto 18px}
+  .box{border:1px solid var(--line2);border-radius:20px;background:#fff;box-shadow:0 2px 10px rgba(26,25,24,.05);padding:10px 10px 10px 16px}
+  .box:focus-within{border-color:#B8B3AA}
+  textarea{width:100%;border:0;outline:0;resize:none;font:inherit;font-size:15px;line-height:1.6;min-height:28px;max-height:200px;padding:4px 0;background:transparent;color:var(--ink)}
+  .boxrow{display:flex;align-items:center;gap:6px;margin-top:6px}
+  .at{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 10px;border-radius:999px;border:1px solid var(--line);font-size:12px;color:var(--muted)}
+  .at:hover{background:var(--hover);color:var(--ink)}
+  .at i{width:7px;height:7px;border-radius:50%}
+  .send{margin-left:auto;width:44px;height:44px;border-radius:50%;background:var(--ink);color:#fff;display:grid;place-items:center}
+  .send:hover{background:#33312E}
+  .hint{font-size:12px;color:var(--faint);text-align:center;margin-top:8px}
+
+  .empty{min-height:56vh;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;gap:10px;padding:20px}
+  .empty h2{margin:0;font-size:24px;letter-spacing:.01em}
+  .empty p{margin:0;color:var(--muted);max-width:460px}
+  .team3{display:flex;gap:8px;margin:6px 0 8px}
+  .examples{display:flex;flex-direction:column;gap:8px;margin-top:10px;width:min(420px,100%)}
+  .ex{text-align:left;min-height:44px;padding:10px 14px;border-radius:12px;border:1px solid var(--line);background:#fff}
+  .ex:hover{background:var(--hover)}
+
+  /* 右侧进度 */
+  .flow{border-left:1px solid var(--line);background:var(--bg);display:flex;flex-direction:column;min-height:0}
+  .flow .fh{padding:16px 18px 10px;display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+  .flow .fh b{font-size:15px}
+  .flow .fh span{font-size:12px;color:var(--faint)}
+  .lanes{flex:1;overflow:auto;padding:0 14px 14px}
+  .lgrid{display:grid;gap:8px}
+  .lhead{position:sticky;top:0;background:var(--bg);padding:6px 0 10px;z-index:1;border-bottom:1px solid var(--line);margin-bottom:10px}
+  .lh{display:flex;flex-direction:column;align-items:center;gap:4px;font-size:12px;color:var(--muted);text-align:center}
+  .rows{display:flex;flex-direction:column;gap:8px;position:relative}
+  .node{width:100%;text-align:left;background:#fff;border:1px solid var(--line);border-radius:12px;padding:8px 10px;font-size:12px;line-height:1.45;min-height:44px}
+  .node:hover{border-color:#C9C4BB}
+  .node .t{font-weight:600;font-size:13px;color:var(--ink);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .node .s{display:flex;align-items:center;gap:5px;margin-top:3px;color:var(--muted)}
+  .node .s i{width:7px;height:7px;border-radius:50%;background:var(--ok)}
+  .node.running .s i{background:#2563EB;animation:p 1.2s infinite}
+  .node.failed .s i{background:#DC2626}
+  .node.dashed{border-style:dashed;border-color:#A8A29E}
+  .node.waiting{background:var(--boss-bg);border:1.5px solid var(--boss)}
+  .node.waiting .s{color:var(--boss-ink);font-weight:700}
+  .node.waiting .s i{background:var(--boss)}
+  @keyframes p{0%{box-shadow:0 0 0 0 rgba(37,99,235,.5)}100%{box-shadow:0 0 0 6px rgba(37,99,235,0)}}
+  .fempty{color:var(--faint);font-size:13px;text-align:center;padding:40px 10px;line-height:1.8}
+  .legend{padding:10px 18px 14px;font-size:12px;color:var(--faint);border-top:1px solid var(--line);display:flex;gap:14px;flex-wrap:wrap}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .legend i{width:14px;height:10px;border-radius:3px;border:1px dashed #A8A29E}
+  .legend i.b{border:1.5px solid var(--boss);background:var(--boss-bg)}
+  .flash{animation:fl 1.4s}
+  @keyframes fl{0%{background:#FFF3C4}100%{background:transparent}}
+
+  dialog{border:0;border-radius:18px;padding:0;width:min(560px,calc(100% - 32px));box-shadow:0 20px 60px rgba(0,0,0,.18)}
+  dialog::backdrop{background:rgba(26,25,24,.35)}
+  .dlg{padding:20px}
+  .dlg h3{margin:0 0 4px;font-size:17px}
+  .dlg p{margin:0 0 12px;color:var(--muted);font-size:13px}
+  .dlg textarea{border:1px solid var(--line2);border-radius:12px;padding:12px;min-height:240px;max-height:none;font-size:14px}
+  .dlg .acts{justify-content:flex-end}
+
+  @media (max-width:1180px){
+    .app,.app.noflow{grid-template-columns:252px minmax(0,1fr)}
+    .flow{position:fixed;right:0;top:0;bottom:0;width:min(440px,100%);z-index:20;box-shadow:-10px 0 40px rgba(0,0,0,.12)}
+  }
+  @media (max-width:760px){
+    .app,.app.noflow{grid-template-columns:minmax(0,1fr)}
+    .side{position:fixed;left:0;top:0;bottom:0;width:272px;z-index:30;transform:translateX(-100%);transition:transform .2s;box-shadow:10px 0 40px rgba(0,0,0,.12)}
+    .app.showside .side{transform:none}
+    .menubtn{display:inline-flex}
+    .msgs,.composer,.typing,.note{width:calc(100% - 28px)}
+    .m.me .bubble{max-width:88%}
+  }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <aside class="side" aria-label="任务和团队">
+    <div class="brand"><span class="mark" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="7" cy="8" r="3"/><circle cx="17" cy="8" r="3"/><circle cx="12" cy="17" r="3"/></svg></span>我的 AI 团队</div>
+    <button class="newbtn" id="newTask" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>新任务</button>
+    <div class="sect">任务</div>
+    <div class="tasks" id="tasks"></div>
+    <div class="sect">团队</div>
+    <div class="teamlist" id="teamlist"></div>
+    <button class="rulesbtn" id="rulesBtn" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h12l4 4v12H4z"/><path d="M8 12h8M8 16h5"/></svg>公司规章（所有 AI 都会遵守）</button>
+  </aside>
+
+  <section class="main" aria-label="工作群">
+    <div class="top">
+      <button class="iconbtn menubtn" id="menuBtn" type="button" aria-label="打开任务列表"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+      <div class="title" id="title">新任务</div>
+      <span class="chipst idle" id="status">还没开始</span>
+      <button class="iconbtn" id="flowBtn" type="button" aria-pressed="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg>进度</button>
+    </div>
+    <div id="note"></div>
+    <div class="scroll" id="scroll"><div class="msgs" id="msgs"></div></div>
+    <div class="typing" id="typing" aria-live="polite"></div>
+    <form class="composer" id="form">
+      <div class="box">
+        <label for="input" class="sr">在群里说话</label>
+        <textarea id="input" rows="1" placeholder="说说你想做什么，或者 @ 某个成员插话"></textarea>
+        <div class="boxrow" id="atrow"></div>
+      </div>
+      <div class="hint" id="hint">回车发送，Shift + 回车换行</div>
+    </form>
+  </section>
+
+  <aside class="flow" id="flow" aria-label="进度">
+    <div class="fh"><b>进度</b><span>点一格，跳到那段对话</span></div>
+    <div class="lanes" id="lanes"></div>
+    <div class="legend"><span><i></i>你插话（成员）</span><span><i class="b"></i>拍板（老板）</span></div>
+  </aside>
+</div>
+
+<dialog id="rulesDlg">
+  <form class="dlg" method="dialog" id="rulesForm">
+    <h3>公司规章</h3>
+    <p>写一次，群里每个 AI 干活时都会照着做。比如账号定位、说话风格、不能做的事。</p>
+    <label for="rulesText" class="sr">公司规章内容</label>
+    <textarea id="rulesText"></textarea>
+    <div class="acts"><button class="btn" value="cancel" type="submit">取消</button><button class="btn primary" id="rulesSave" type="button">保存</button></div>
+  </form>
+</dialog>
+
+<script>
+const S = { team:null, msgs:[], nodes:[], pending:null, busy:false, typing:[], history:[], viewing:null, live:null };
+const $ = (id) => document.getElementById(id);
+const ICON = {
+  send:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
+  check:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>',
+  crown:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8l4 4 5-7 5 7 4-4-2 11H5z"/></svg>'
+};
+const EXAMPLES = ['下周想发一期视频，帮我想选题', '帮我把这段口播稿改得更口语一点', '我想做一个个人网站，帮我出个方案'];
+const STATUS = { done:'已完成', running:'进行中', waiting:'等你拍板', failed:'出错了' };
+
+function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function member(id){ return S.team.members.find(m => m.id === id); }
+const ME = { id:'me', name:'我', role:'老板 / 成员', avatar:'我', color:'#1A1918' };
+function lanes(){ return [ME, ...S.team.members]; }
+function av(p, cls){ return `<span class="av ${cls||''}" aria-hidden="true" style="background:${p.color}">${esc(p.avatar)}</span>`; }
+function fmt(text){
+  let h = esc(text);
+  h = h.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/`([^`\n]+)`/g, '<code>$1</code>').replace(/^#{1,6}\s*(.+)$/gm, '<b>$1</b>');
+  for (const m of S.team.members){
+    const re = new RegExp('@(' + [m.name, m.id].map(x => x.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|') + ')(?![\\w])', 'gi');
+    h = h.replace(re, `<b style="color:${m.color}">@$1</b>`);
+  }
+  return h.replace(/\n/g, '<br>');
+}
+function view(){ return S.viewing || S.live; }
+function taskTitle(st){ const f = (st.messages || []).find(m => m.from === 'me'); return f ? f.text : '新任务'; }
+function taskStatus(st, live){
+  if (!st.messages || !st.messages.length) return ['idle','还没开始'];
+  if (st.pending) return ['wait','等你拍板'];
+  if (live && S.busy) return ['live','团队在干活'];
+  if (st.messages.some(m => m.kind === 'done')) return ['fin','已交付'];
+  return ['idle','等你说话'];
+}
+
+/* ---------- 渲染 ---------- */
+function renderSide(){
+  const cur = S.live;
+  const [cs] = taskStatus(cur, true);
+  let h = `<button type="button" class="task ${!S.viewing ? 'active' : ''}" data-task=""><span class="sdot ${cs}"></span><span class="tt">${esc(cur.messages.length ? taskTitle(cur) : '新任务')}</span></button>`;
+  h += S.history.map(t => `<button type="button" class="task ${S.viewing && S.viewing._id === t.id ? 'active' : ''}" data-task="${esc(t.id)}"><span class="sdot ${t.done ? 'fin' : ''}"></span><span class="tt">${esc(t.title)}</span></button>`).join('');
+  $('tasks').innerHTML = h;
+  $('teamlist').innerHTML = S.team.members.map(m => `<div class="tm" title="擅长：${esc(m.strengths)}&#10;短板：${esc(m.weaknesses)}">${av(m)}<div class="nm">${esc(m.name)}<div class="rl">${esc(m.role)}</div></div><span class="pill ${m.online ? 'on' : 'off'}">${m.online ? '在线' : '演示'}</span></div>`).join('');
+  $('newTask').disabled = S.busy;
+}
+
+function renderTop(){
+  const st = view();
+  $('title').textContent = st.messages.length ? taskTitle(st) : '新任务';
+  const [cls, label] = S.viewing ? (st.messages.some(m => m.kind === 'done') ? ['fin','已交付'] : ['idle','历史任务']) : taskStatus(st, true);
+  $('status').className = 'chipst ' + cls; $('status').textContent = label;
+  const off = S.team.members.filter(m => !m.online).map(m => m.name);
+  $('note').innerHTML = S.viewing
+    ? `<div class="note">这是历史任务，只能查看。<button type="button" class="at" data-task="" style="margin-left:8px">回到当前任务</button></div>`
+    : off.length ? `<div class="note">${esc(off.join('、'))} 还没检测到，先用演示回复带你走一遍。装好并登录后，重新启动就是真的了。</div>` : '';
+  $('form').style.display = S.viewing ? 'none' : '';
+  document.title = (!S.viewing && S.live.pending ? '【等你拍板】' : '') + '我的 AI 团队';
+}
+
+function msgHTML(m){
+  if (m.kind === 'system') return `<div class="sys" id="m-${m.id}">${esc(m.text)}</div>`;
+  if (m.from === 'me') return `<div class="m me" id="m-${m.id}"><div class="bubble">${fmt(m.text)}</div></div>`;
+  const p = member(m.from) || { name:m.from, role:'', avatar:'?', color:'#78716C' };
+  const tags = (m.task ? `<span class="tag">${esc(m.task)}</span>` : '') + (m.demo ? '<span class="tag">演示</span>' : '');
+  let body = m.text ? `<div class="txt">${fmt(m.text)}</div>` : '';
+  if (m.kind === 'decision' && m.card) {
+    const c = m.card;
+    const li = [
+      ...c.adopted.map(a => { const q = member(a.from); return `<li><span class="k" style="background:${q ? q.color : '#78716C'}">采纳 ${esc(q ? q.name : a.from)}</span><span>${esc(a.point)}</span></li>`; }),
+      ...c.rejected.map(r => `<li><span class="k no">没采纳</span><span>${esc(r.item)}${r.reason ? '。' + esc(r.reason) : ''}</span></li>`),
+      ...(c.backup ? [`<li><span class="k bk">备选</span><span>${esc(c.backup)}</span></li>`] : [])
+    ].join('');
+    const pending = !S.viewing && S.live.pending && S.live.pending.msgId === m.id;
+    const foot = pending
+      ? `<div class="acts"><button type="button" class="btn primary" data-decide="main">就这么干</button>${c.backup ? '<button type="button" class="btn" data-decide="backup">换成备选</button>' : ''}<button type="button" class="btn" data-say="1">我再说说</button></div>`
+      : (m.resolved ? (m.resolved === '你提了意见'
+          ? `<div class="resolved" style="color:var(--muted)">你没拍板，提了意见</div>`
+          : `<div class="resolved">${ICON.check}已拍板：${esc(m.resolved)}</div>`) : '');
+    body += `<div class="card"><div class="hd">${ICON.crown}需要你拍板 · 这里你是老板</div><h3>${esc(c.title)}</h3><ul>${li}</ul>${foot}</div>`;
+  }
+  if (m.kind === 'done') body = `<div class="deliver"><div class="hd">${ICON.check}交付</div><div class="txt">${fmt(m.text)}</div></div>`;
+  return `<div class="m" id="m-${m.id}">${av(p)}<div class="body"><div class="who"><b>${esc(p.name)}</b><span class="rl">${esc(p.role)}</span>${tags}</div>${body}</div></div>`;
+}
+
+function renderChat(){
+  const st = view();
+  const sc = $('scroll');
+  const near = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 160;
+  if (!st.messages.length) {
+    $('msgs').innerHTML = `<div class="empty">
+      <div class="team3">${S.team.members.map(m => av(m)).join('')}</div>
+      <h2>说一句需求，团队就开始干活</h2>
+      <p>${esc(S.team.members.map(m => m.name + '负责' + m.role).join('，'))}。你随时可以插话，关键的地方由你拍板。</p>
+      <div class="examples">${EXAMPLES.map(t => `<button type="button" class="ex" data-ex="${esc(t)}">${esc(t)}</button>`).join('')}</div></div>`;
+  } else {
+    $('msgs').innerHTML = st.messages.map(msgHTML).join('');
+  }
+  if (near) sc.scrollTop = sc.scrollHeight;
+}
+
+function renderFlow(){
+  const st = view(); const L = lanes();
+  const cols = `grid-template-columns:repeat(${L.length},minmax(0,1fr))`;
+  let h = `<div class="lgrid lhead" style="${cols}">${L.map(p => `<div class="lh">${av(p)}<span>${esc(p.name)}</span></div>`).join('')}</div>`;
+  if (!st.nodes.length) { $('lanes').innerHTML = h + '<div class="fempty">还没开始。<br>你在群里说完需求，这里会一格一格长出来。</div>'; return; }
+  const rows = {};
+  for (const n of st.nodes) (rows[n.row] = rows[n.row] || []).push(n);
+  h += '<div class="rows">' + Object.keys(rows).map(Number).sort((a,b) => a-b).map(r =>
+    `<div class="lgrid" style="${cols}">` + rows[r].map(n => {
+      const col = Math.max(0, L.findIndex(p => p.id === n.lane)) + 1;
+      return `<button type="button" class="node ${n.status} ${n.dashed ? 'dashed' : ''}" style="grid-column:${col};grid-row:1" data-goto="${n.msgId || ''}"><div class="t">${esc(n.title)}</div><div class="s"><i></i>${STATUS[n.status] || n.status}</div></button>`;
+    }).join('') + '</div>').join('') + '</div>';
+  $('lanes').innerHTML = h;
+  const w = $('lanes'); w.scrollTop = w.scrollHeight;
+}
+
+function renderTyping(){
+  if (S.viewing) { $('typing').innerHTML = ''; return; }
+  const ps = S.typing.map(member).filter(Boolean);
+  $('typing').innerHTML = ps.length ? `<span class="minis">${ps.map(p => av(p)).join('')}</span><span style="margin-left:6px">${esc(ps.map(p => p.name).join('、'))} 正在干活</span><span class="dots"><i></i><i></i><i></i></span>` : '';
+}
+function renderAt(){
+  $('atrow').innerHTML = S.team.members.map(m => `<button type="button" class="at" data-at="${esc(m.name)}"><i style="background:${m.color}"></i>@${esc(m.name)}</button>`).join('') +
+    `<button type="submit" class="send" aria-label="发送">${ICON.send}</button>`;
+}
+function renderAll(){ renderSide(); renderTop(); renderChat(); renderFlow(); renderTyping(); }
+
+/* ---------- 数据 ---------- */
+function upsert(list, item){ const i = list.findIndex(x => x.id === item.id); if (i >= 0) list[i] = item; else list.push(item); }
+async function loadHistory(){ S.history = await (await fetch('/api/history')).json(); }
+async function load(){
+  const d = await (await fetch('/api/state')).json();
+  S.team = d.team; S.live = d.state; S.busy = d.busy; S.typing = d.typing;
+  await loadHistory(); renderAt(); renderAll();
+}
+function connect(){
+  const es = new EventSource('/api/events');
+  const live = (fn) => (e) => { if (!S.live) return; fn(JSON.parse(e.data)); };
+  es.addEventListener('message', live(m => { upsert(S.live.messages, m); if (!S.viewing) renderChat(); renderSide(); renderTop(); }));
+  es.addEventListener('node', live(n => { upsert(S.live.nodes, n); if (!S.viewing) renderFlow(); }));
+  es.addEventListener('typing', live(t => { S.typing = t; renderTyping(); }));
+  es.addEventListener('busy', live(b => { S.busy = b; renderSide(); renderTop(); }));
+  es.addEventListener('pending', live(p => { S.live.pending = p; if (!S.viewing) renderChat(); renderSide(); renderTop(); }));
+  es.addEventListener('reset', () => { S.viewing = null; load(); });
+  es.onopen = () => load();
+}
+async function post(path, body){
+  const r = await fetch(path, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body || {}) });
+  if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || '出错了'); return false; }
+  return true;
+}
+async function openTask(id){
+  $('app').classList.remove('showside');
+  if (!id) { S.viewing = null; renderAll(); return; }
+  const d = await (await fetch('/api/history/' + encodeURIComponent(id))).json();
+  S.viewing = Object.assign(d.state, { _id:id, pending:null }); renderAll();
+}
+
+/* ---------- 交互 ---------- */
+const input = $('input');
+function grow(){ input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 200) + 'px'; }
+input.addEventListener('input', grow);
+input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('form').requestSubmit(); } });
+$('form').addEventListener('submit', e => {
+  e.preventDefault();
+  const t = input.value.trim(); if (!t) return;
+  input.value = ''; grow(); input.placeholder = '说说你想做什么，或者 @ 某个成员插话';
+  post('/api/message', { text:t });
+});
+document.addEventListener('click', async e => {
+  if ($('app').classList.contains('showside') && !e.target.closest('.side') && !e.target.closest('#menuBtn')) { $('app').classList.remove('showside'); return; }
+  const b = e.target.closest('button'); if (!b) return;
+  const d = b.dataset;
+  if (d.at) { input.value = (input.value && !input.value.endsWith(' ') ? input.value + ' ' : input.value) + '@' + d.at + ' '; input.focus(); grow(); }
+  else if (d.ex) { input.value = d.ex; input.focus(); grow(); }
+  else if (d.decide) post('/api/decide', { choice:d.decide });
+  else if (d.say) { input.placeholder = '说说哪里不满意，大家会接着改'; input.focus(); }
+  else if (d.goto) { const el = $('m-' + d.goto); if (el) { el.scrollIntoView({ behavior:'smooth', block:'center' }); el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); } }
+  else if (d.task !== undefined) openTask(d.task);
+  else if (b.id === 'newTask') { if (!S.live.messages.length) { openTask(''); return; } if (confirm('开一个新任务？现在这段会存到左边的任务列表里。')) { S.viewing = null; await post('/api/reset'); } }
+  else if (b.id === 'flowBtn') { const on = $('app').classList.toggle('noflow'); b.setAttribute('aria-pressed', String(!on)); }
+  else if (b.id === 'menuBtn') $('app').classList.toggle('showside');
+  else if (b.id === 'rulesBtn') { $('rulesText').value = (await (await fetch('/api/rules')).json()).text; $('rulesDlg').showModal(); }
+  else if (b.id === 'rulesSave') { if (await post('/api/rules', { text:$('rulesText').value })) $('rulesDlg').close(); }
+});
+if (window.matchMedia('(max-width:1180px)').matches) { $('app').classList.add('noflow'); $('flowBtn').setAttribute('aria-pressed','false'); }
+connect();
+</script>
+</body>
+</html>
