@@ -158,6 +158,23 @@
   .dlg textarea{border:1px solid var(--line2);border-radius:12px;padding:12px;min-height:240px;max-height:none;font-size:14px}
   .dlg .acts{justify-content:flex-end}
 
+  .caret{display:inline-block;width:7px;height:15px;background:var(--faint);vertical-align:-2px;margin-left:2px;animation:bl 1s steps(1) infinite}
+  @keyframes bl{50%{opacity:0}}
+  .tm{width:100%;text-align:left}
+  .tm:hover{background:var(--hover)}
+  .pill.warn{color:var(--boss-ink);background:#FEF3C7}
+  .note .at{background:#fff}
+  .doc{display:flex;flex-direction:column;gap:12px;max-height:70vh;overflow-y:auto;margin:4px 0 8px}
+  .dm{border:1px solid var(--line);border-radius:14px;padding:12px 14px}
+  .dm .row1{display:flex;align-items:center;gap:10px}
+  .dm .row1 .nm{flex:1;min-width:0;font-weight:700}
+  .dm .row1 .nm span{font-weight:400;color:var(--faint);font-size:12px;margin-left:6px}
+  .dm .st2{font-size:13px;color:var(--muted);margin-top:8px;word-break:break-word}
+  .dm .st2.ok{color:var(--ok)}.dm .st2.bad{color:#991B1B}
+  .dm .step{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;margin-top:8px;color:var(--muted)}
+  .dm code{background:#F1EFEA;border-radius:6px;padding:2px 8px;font-size:13px;color:var(--ink)}
+  .dm .sm{min-height:36px;padding:0 12px;border-radius:10px;font-size:13px}
+  .dm pre{margin:8px 0 0;max-height:140px;overflow:auto;background:#1A1918;color:#E7E5E4;border-radius:10px;padding:8px 10px;font-size:11px;white-space:pre-wrap;word-break:break-all}
   @media (max-width:1180px){
     .app,.app.noflow{grid-template-columns:252px minmax(0,1fr)}
     .flow{position:fixed;right:0;top:0;bottom:0;width:min(440px,100%);z-index:20;box-shadow:-10px 0 40px rgba(0,0,0,.12)}
@@ -211,6 +228,15 @@
   </aside>
 </div>
 
+<dialog id="teamDlg">
+  <div class="dlg">
+    <h3>团队体检</h3>
+    <p>每个 AI 用的是你电脑上登录好的命令行版，跟它的网页版、App 是同一个账号、同一份会员。三步：安装 → 登录 → 测试。</p>
+    <div class="doc" id="doc"></div>
+    <div class="acts"><button class="btn" type="button" id="docRefresh">重新检查</button><button class="btn primary" type="button" id="docClose">好了</button></div>
+  </div>
+</dialog>
+
 <dialog id="rulesDlg">
   <form class="dlg" method="dialog" id="rulesForm">
     <h3>公司规章</h3>
@@ -222,7 +248,7 @@
 </dialog>
 
 <script>
-const S = { team:null, msgs:[], nodes:[], pending:null, busy:false, typing:[], history:[], viewing:null, live:null };
+const S = { team:null, msgs:[], nodes:[], pending:null, busy:false, typing:[], history:[], viewing:null, live:null, since:{}, logs:{}, versions:{}, hints:{} };
 const $ = (id) => document.getElementById(id);
 const ICON = {
   send:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
@@ -247,6 +273,12 @@ function fmt(text){
   return h.replace(/\n/g, '<br>');
 }
 function view(){ return S.viewing || S.live; }
+function memberState(m){
+  if (m.installing) return ['warn','安装中'];
+  if (!m.installed || !m.online) return ['off','演示'];
+  if (m.lastTest && !m.lastTest.ok) return ['warn','没接通'];
+  return ['on','在线'];
+}
 function taskTitle(st){ const f = (st.messages || []).find(m => m.from === 'me'); return f ? f.text : '新任务'; }
 function taskStatus(st, live){
   if (!st.messages || !st.messages.length) return ['idle','还没开始'];
@@ -263,7 +295,7 @@ function renderSide(){
   let h = `<button type="button" class="task ${!S.viewing ? 'active' : ''}" data-task=""><span class="sdot ${cs}"></span><span class="tt">${esc(cur.messages.length ? taskTitle(cur) : '新任务')}</span></button>`;
   h += S.history.map(t => `<button type="button" class="task ${S.viewing && S.viewing._id === t.id ? 'active' : ''}" data-task="${esc(t.id)}"><span class="sdot ${t.done ? 'fin' : ''}"></span><span class="tt">${esc(t.title)}</span></button>`).join('');
   $('tasks').innerHTML = h;
-  $('teamlist').innerHTML = S.team.members.map(m => `<div class="tm" title="擅长：${esc(m.strengths)}&#10;短板：${esc(m.weaknesses)}">${av(m)}<div class="nm">${esc(m.name)}<div class="rl">${esc(m.role)}</div></div><span class="pill ${m.online ? 'on' : 'off'}">${m.online ? '在线' : '演示'}</span></div>`).join('');
+  $('teamlist').innerHTML = S.team.members.map(m => { const [c, l] = memberState(m); return `<button type="button" class="tm" data-doctor="1" title="擅长：${esc(m.strengths)}&#10;短板：${esc(m.weaknesses)}&#10;点击打开团队体检">${av(m)}<div class="nm">${esc(m.name)}<div class="rl">${esc(m.role)}</div></div><span class="pill ${c}">${l}</span></button>`; }).join('');
   $('newTask').disabled = S.busy;
 }
 
@@ -272,10 +304,10 @@ function renderTop(){
   $('title').textContent = st.messages.length ? taskTitle(st) : '新任务';
   const [cls, label] = S.viewing ? (st.messages.some(m => m.kind === 'done') ? ['fin','已交付'] : ['idle','历史任务']) : taskStatus(st, true);
   $('status').className = 'chipst ' + cls; $('status').textContent = label;
-  const off = S.team.members.filter(m => !m.online).map(m => m.name);
+  const off = S.team.members.filter(m => memberState(m)[0] !== 'on').map(m => m.name);
   $('note').innerHTML = S.viewing
     ? `<div class="note">这是历史任务，只能查看。<button type="button" class="at" data-task="" style="margin-left:8px">回到当前任务</button></div>`
-    : off.length ? `<div class="note">${esc(off.join('、'))} 还没检测到，先用演示回复带你走一遍。装好并登录后，重新启动就是真的了。</div>` : '';
+    : off.length ? `<div class="note">${esc(off.join('、'))} 还没接上，现在用演示回复。<button type="button" class="at" data-doctor="1" style="margin-left:8px">去接上</button></div>` : '';
   $('form').style.display = S.viewing ? 'none' : '';
   document.title = (!S.viewing && S.live.pending ? '【等你拍板】' : '') + '我的 AI 团队';
 }
@@ -285,7 +317,7 @@ function msgHTML(m){
   if (m.from === 'me') return `<div class="m me" id="m-${m.id}"><div class="bubble">${fmt(m.text)}</div></div>`;
   const p = member(m.from) || { name:m.from, role:'', avatar:'?', color:'#78716C' };
   const tags = (m.task ? `<span class="tag">${esc(m.task)}</span>` : '') + (m.demo ? '<span class="tag">演示</span>' : '');
-  let body = m.text ? `<div class="txt">${fmt(m.text)}</div>` : '';
+  let body = m.text ? `<div class="txt">${fmt(m.text)}${m.streaming ? '<span class="caret" aria-hidden="true"></span>' : ''}</div>` : '';
   if (m.kind === 'decision' && m.card) {
     const c = m.card;
     const li = [
@@ -340,13 +372,49 @@ function renderFlow(){
 function renderTyping(){
   if (S.viewing) { $('typing').innerHTML = ''; return; }
   const ps = S.typing.map(member).filter(Boolean);
-  $('typing').innerHTML = ps.length ? `<span class="minis">${ps.map(p => av(p)).join('')}</span><span style="margin-left:6px">${esc(ps.map(p => p.name).join('、'))} 正在干活</span><span class="dots"><i></i><i></i><i></i></span>` : '';
+  const now = Date.now();
+  for (const id of S.typing) if (!S.since[id]) S.since[id] = now;
+  for (const id of Object.keys(S.since)) if (!S.typing.includes(id)) delete S.since[id];
+  const secs = ps.length ? Math.round((now - Math.min(...ps.map(p => S.since[p.id]))) / 1000) : 0;
+  $('typing').innerHTML = ps.length ? `<span class="minis">${ps.map(p => av(p)).join('')}</span><span style="margin-left:6px">${esc(ps.map(p => p.name).join('、'))} 正在干活${secs >= 3 ? `（${secs} 秒）` : ''}</span><span class="dots"><i></i><i></i><i></i></span>` : '';
 }
 function renderAt(){
   $('atrow').innerHTML = S.team.members.map(m => `<button type="button" class="at" data-at="${esc(m.name)}"><i style="background:${m.color}"></i>@${esc(m.name)}</button>`).join('') +
     `<button type="submit" class="send" aria-label="发送">${ICON.send}</button>`;
 }
 function renderAll(){ renderSide(); renderTop(); renderChat(); renderFlow(); renderTyping(); }
+
+function renderDoctor(){
+  if (!$('teamDlg').open) return;
+  $('doc').innerHTML = S.team.members.map(m => {
+    const [c, l] = memberState(m);
+    const ver = S.versions[m.id] ? `<span>${esc(S.versions[m.id])}</span>` : '';
+    let status, steps = '';
+    if (m.installing) status = `<div class="st2">正在安装，大概要一两分钟…</div>`;
+    else if (!m.installed) {
+      status = `<div class="st2">还没安装。</div>`;
+      steps = `<div class="step"><button type="button" class="btn primary sm" data-install="${m.id}">一键安装</button>${S.hints[m.id] ? `<span style="color:#991B1B">${esc(S.hints[m.id])}</span>` : ''}</div>`;
+    } else {
+      const t = m.lastTest;
+      status = t ? (t.ok ? `<div class="st2 ok">测试通过：${esc(t.text)}</div>` : `<div class="st2 bad">没接通：${esc(t.text)}</div>`) : `<div class="st2">已安装，还没测试。</div>`;
+      steps = `<div class="step">① 在终端运行 <code>${esc(m.login)}</code> 登录（用你的会员账号，登录过就跳过）<button type="button" class="btn sm" data-copy="${esc(m.login)}">复制</button></div>
+        <div class="step">② <button type="button" class="btn ${t && t.ok ? '' : 'primary'} sm" data-test="${m.id}">测试连接</button><span id="tst-${m.id}"></span></div>`;
+    }
+    const log = S.logs[m.id] ? `<pre>${esc(S.logs[m.id].slice(-40).join('\n'))}</pre>` : '';
+    return `<div class="dm">
+      <div class="row1">${av(m)}<div class="nm">${esc(m.name)}<span>${esc(m.role)}</span>${ver ? '' : ''}</div><span class="pill ${c}">${l}</span></div>
+      ${ver ? `<div class="st2">版本：${ver}</div>` : ''}${status}${steps}${log}</div>`;
+  }).join('');
+}
+async function openDoctor(){
+  $('app').classList.remove('showside');
+  if (!$('teamDlg').open) $('teamDlg').showModal();
+  renderDoctor();
+  const d = await (await fetch('/api/doctor')).json();
+  for (const m of d.members) S.versions[m.id] = m.version;
+  S.team.members = S.team.members.map(x => Object.assign(x, d.members.find(y => y.id === x.id) || {}));
+  renderDoctor(); renderSide(); renderTop();
+}
 
 /* ---------- 数据 ---------- */
 function upsert(list, item){ const i = list.findIndex(x => x.id === item.id); if (i >= 0) list[i] = item; else list.push(item); }
@@ -365,6 +433,13 @@ function connect(){
   es.addEventListener('busy', live(b => { S.busy = b; renderSide(); renderTop(); }));
   es.addEventListener('pending', live(p => { S.live.pending = p; if (!S.viewing) renderChat(); renderSide(); renderTop(); }));
   es.addEventListener('reset', () => { S.viewing = null; load(); });
+  es.addEventListener('team', live(ms => { S.team.members = ms; renderSide(); renderTop(); renderAt(); renderDoctor(); }));
+  es.addEventListener('install', live(e => {
+    (S.logs[e.id] = S.logs[e.id] || []);
+    if (e.line) S.logs[e.id].push(e.line);
+    if (e.done) { S.hints[e.id] = e.hint || ''; if (e.ok) S.logs[e.id].push('安装完成。下一步：登录，然后点"测试连接"。'); }
+    renderDoctor();
+  }));
   es.onopen = () => load();
 }
 async function post(path, body){
@@ -403,9 +478,19 @@ document.addEventListener('click', async e => {
   else if (b.id === 'newTask') { if (!S.live.messages.length) { openTask(''); return; } if (confirm('开一个新任务？现在这段会存到左边的任务列表里。')) { S.viewing = null; await post('/api/reset'); } }
   else if (b.id === 'flowBtn') { const on = $('app').classList.toggle('noflow'); b.setAttribute('aria-pressed', String(!on)); }
   else if (b.id === 'menuBtn') $('app').classList.toggle('showside');
+  else if (d.doctor) openDoctor();
+  else if (d.install) { S.logs[d.install] = []; S.hints[d.install] = ''; post('/api/install', { id:d.install }); }
+  else if (d.test) {
+    const el = $('tst-' + d.test); if (el) el.textContent = ' 测试中，最多一两分钟…';
+    b.disabled = true; await post('/api/test', { id:d.test }); renderDoctor();
+  }
+  else if (d.copy) { try { await navigator.clipboard.writeText(d.copy); b.textContent = '已复制'; } catch { b.textContent = d.copy; } }
+  else if (b.id === 'docClose') $('teamDlg').close();
+  else if (b.id === 'docRefresh') openDoctor();
   else if (b.id === 'rulesBtn') { $('rulesText').value = (await (await fetch('/api/rules')).json()).text; $('rulesDlg').showModal(); }
   else if (b.id === 'rulesSave') { if (await post('/api/rules', { text:$('rulesText').value })) $('rulesDlg').close(); }
 });
+setInterval(() => { if (S.typing.length) renderTyping(); }, 1000);
 if (window.matchMedia('(max-width:1180px)').matches) { $('app').classList.add('noflow'); $('flowBtn').setAttribute('aria-pressed','false'); }
 connect();
 </script>

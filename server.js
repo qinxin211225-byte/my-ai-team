@@ -14,19 +14,25 @@ if (major < 18) {
   process.exit(1);
 }
 
+const os = require('os');
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT) || 3939;
 const HOST = '127.0.0.1';
 const DEMO_ALL = process.env.DEMO === '1' || process.argv.includes('--demo');
 const NO_OPEN = process.argv.includes('--no-open');
-const WORKDIR = path.join(ROOT, 'workspace');
-const DATA_DIR = path.join(ROOT, 'data');
+// 你的数据放在用户目录里（~/.my-ai-team），更新程序不会丢
+const HOME_DIR = process.env.AI_TEAM_HOME || path.join(os.homedir(), '.my-ai-team');
+const WORKDIR = path.join(HOME_DIR, 'workspace');
+const DATA_DIR = path.join(HOME_DIR, 'data');
 const HISTORY_DIR = path.join(DATA_DIR, 'history');
 const SESSION_FILE = path.join(DATA_DIR, 'session.json');
+const RULES_FILE = path.join(HOME_DIR, 'rules.md');
 for (const d of [WORKDIR, DATA_DIR, HISTORY_DIR]) fs.mkdirSync(d, { recursive: true });
+if (!fs.existsSync(RULES_FILE)) fs.copyFileSync(path.join(ROOT, 'rules.md'), RULES_FILE);
 
-// ---------- 团队配置 ----------
-const team = JSON.parse(fs.readFileSync(path.join(ROOT, 'team.json'), 'utf8'));
+// ---------- 团队配置（~/.my-ai-team/team.json 存在就用它，否则用默认的） ----------
+const TEAM_FILE = fs.existsSync(path.join(HOME_DIR, 'team.json')) ? path.join(HOME_DIR, 'team.json') : path.join(ROOT, 'team.json');
+const team = JSON.parse(fs.readFileSync(TEAM_FILE, 'utf8'));
 const members = team.members;
 const pm = members.find((m) => m.id === team.pm) || members[0];
 const TIMEOUT_MS = (team.timeoutSec || 300) * 1000;
@@ -41,11 +47,17 @@ function hasCommand(cmd) {
     return false;
   }
 }
-for (const m of members) m.online = !DEMO_ALL && hasCommand(m.command);
+function detect() {
+  for (const m of members) {
+    m.installed = hasCommand(m.command);
+    m.online = !DEMO_ALL && m.installed;
+  }
+}
+detect();
 
 function readRules() {
   try {
-    return fs.readFileSync(path.join(ROOT, 'rules.md'), 'utf8').trim();
+    return fs.readFileSync(RULES_FILE, 'utf8').trim();
   } catch {
     return '';
   }
@@ -166,11 +178,16 @@ function sleep(ms) {
 }
 
 // ---------- 调用命令行 ----------
-function runCLI(m, prompt) {
+// format:
+//   "claude-stream"：claude -p --output-format stream-json，边写边显示，能识别报错
+//   "text"（默认）：读标准输出，边写边显示
+//   有 {OUT} 参数的（Codex）：最后从文件里读最终回复
+function runCLI(m, prompt, onPartial, timeoutMs = TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     const outName = `.out-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.txt`;
     const usesOut = m.args.includes('{OUT}');
     const args = m.args.map((a) => (a === '{OUT}' ? outName : a));
+    const stream = m.format === 'claude-stream';
     const child = spawn(m.command, args, {
       cwd: WORKDIR,
       shell: process.platform === 'win32', // Windows 上 npm 装的命令是 .cmd，需要 shell
@@ -178,27 +195,61 @@ function runCLI(m, prompt) {
     });
     let out = '';
     let err = '';
-    child.stdout.on('data', (d) => (out += d));
+    let buf = '';
+    let partial = '';
+    let result = null;
+    let isError = false;
+    const emit = (t) => onPartial && t && onPartial(t);
+    child.stdout.on('data', (d) => {
+      d = String(d);
+      out += d;
+      if (!stream) {
+        if (!usesOut) emit(out.trim());
+        return;
+      }
+      buf += d;
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i).trim();
+        buf = buf.slice(i + 1);
+        if (!line) continue;
+        let ev;
+        try {
+          ev = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        const delta = ev.type === 'stream_event' && ev.event && ev.event.delta;
+        if (delta && delta.type === 'text_delta' && delta.text) {
+          partial += delta.text;
+          emit(partial);
+        } else if (ev.type === 'result') {
+          result = typeof ev.result === 'string' ? ev.result : '';
+          isError = !!ev.is_error;
+        }
+      }
+    });
     child.stderr.on('data', (d) => (err += d));
     const timer = setTimeout(() => {
       child.kill();
-      reject(new Error(`${m.name} 超过 ${TIMEOUT_MS / 1000} 秒没回应`));
-    }, TIMEOUT_MS);
+      reject(new Error(`${m.name} 超过 ${Math.round(timeoutMs / 1000)} 秒没回应`));
+    }, timeoutMs);
     child.on('error', (e) => {
       clearTimeout(timer);
-      reject(e);
+      reject(e.code === 'ENOENT' ? new Error(`找不到命令 ${m.command}，还没安装？`) : e);
     });
     child.on('close', (code) => {
       clearTimeout(timer);
-      let text = out;
+      let text = stream ? (result !== null ? result : partial) : out;
       const outPath = path.join(WORKDIR, outName);
       if (usesOut && fs.existsSync(outPath)) {
         text = fs.readFileSync(outPath, 'utf8');
         fs.unlink(outPath, () => {});
       }
-      text = String(text).trim();
-      if (code !== 0 && !text) reject(new Error(clip(err.trim(), 400) || `退出码 ${code}`));
-      else resolve(text);
+      text = String(text || '').trim();
+      if (isError) return reject(new Error(clip(text || err.trim(), 400) || '出错了'));
+      if (code !== 0 && !text) return reject(new Error(clip(err.trim(), 400) || `退出码 ${code}`));
+      resolve(text);
     });
     child.stdin.on('error', () => {});
     child.stdin.write(prompt);
@@ -206,9 +257,9 @@ function runCLI(m, prompt) {
   });
 }
 
-async function call(m, prompt, kind) {
-  if (!m.online) return demoReply(m, prompt, kind);
-  return runCLI(m, prompt);
+async function call(m, prompt, kind, onPartial) {
+  if (!m.online) return demoReply(m, prompt, kind, onPartial);
+  return runCLI(m, prompt, onPartial);
 }
 
 // ---------- 提示词 ----------
@@ -280,18 +331,40 @@ function normalizeCard(c) {
   };
 }
 
+function errText(m, e) {
+  const msg = String((e && e.message) || e);
+  const login = /auth|login|log in|unauthori|401|403|credential|token|api key|登录/i.test(msg);
+  return `${m.name} 出错了：${msg}` + (login ? `。看起来还没登录：在终端运行「${m.login || m.command}」登录，然后点左下角的成员打开「团队体检」测试。` : '');
+}
+
 // ---------- 干活 ----------
 async function runMember(m, prompt, title, row) {
   const node = addNode({ lane: m.id, title, status: 'running', row });
   setTyping(m.id, true);
+  let msg = null;
+  let last = 0;
+  // 边写边显示：第一段文字出来时建消息，之后最多每 0.3 秒刷新一次
+  const onPartial = (t) => {
+    if (!msg) {
+      msg = addMessage({ from: m.id, text: t, demo: !m.online, task: title, streaming: true });
+      patchNode(node.id, { msgId: msg.id });
+      last = Date.now();
+    } else if (Date.now() - last > 300) {
+      last = Date.now();
+      msg.text = t;
+      broadcast('message', msg);
+    }
+  };
   try {
-    const text = await call(m, prompt, 'agent');
+    const text = await call(m, prompt, 'agent', onPartial);
     setTyping(m.id, false);
-    const msg = addMessage({ from: m.id, text: text || '（没有返回内容）', demo: !m.online, task: title });
+    if (msg) patchMessage(msg.id, { text: text || msg.text || '（没有返回内容）', streaming: false });
+    else msg = addMessage({ from: m.id, text: text || '（没有返回内容）', demo: !m.online, task: title });
     patchNode(node.id, { status: 'done', msgId: msg.id });
   } catch (e) {
     setTyping(m.id, false);
-    const msg = addMessage({ from: 'system', kind: 'system', text: `${m.name} 出错了：${e.message}` });
+    if (msg) patchMessage(msg.id, { streaming: false });
+    msg = addMessage({ from: 'system', kind: 'system', text: errText(m, e) });
     patchNode(node.id, { status: 'failed', msgId: msg.id });
   }
 }
@@ -304,7 +377,7 @@ async function pmLoop() {
       raw = await call(pm, pmPrompt(), 'pm');
     } catch (e) {
       setTyping(pm.id, false);
-      addMessage({ from: 'system', kind: 'system', text: `${pm.name}（项目经理）出错了：${e.message}` });
+      addMessage({ from: 'system', kind: 'system', text: errText(pm, e) });
       return;
     }
     setTyping(pm.id, false);
@@ -402,9 +475,21 @@ function resetSession() {
 }
 
 // ---------- 演示模式（没装命令行工具时用） ----------
-async function demoReply(m, prompt, kind) {
-  await sleep(700 + Math.random() * 900);
+async function demoReply(m, prompt, kind, onPartial) {
+  await sleep(600 + Math.random() * 700);
   if (kind === 'pm') return JSON.stringify(demoPM());
+  const text = demoText(m, prompt);
+  // 演示也一段一段地出字，和真的一样
+  if (onPartial) {
+    for (let i = 6; i < text.length; i += 6) {
+      onPartial(text.slice(0, i));
+      await sleep(60);
+    }
+  }
+  return text;
+}
+
+function demoText(m, prompt) {
   const fromMe = prompt.includes('老板刚在群里直接找你：');
   const instruction = prompt.split(/老板刚在群里直接找你：|派给你的任务：/).pop().split('\n\n要求：')[0];
   if (fromMe) {
@@ -512,8 +597,63 @@ function readBody(req) {
 }
 const ALLOWED_HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);
 function publicMember(m) {
-  const { id, name, role, avatar, color, strengths, weaknesses, online } = m;
-  return { id, name, role, avatar, color, strengths, weaknesses, online };
+  const { id, name, role, avatar, color, strengths, weaknesses, online, installed, install, login, lastTest } = m;
+  return { id, name, role, avatar, color, strengths, weaknesses, online, installed, install, login, lastTest: lastTest || null, installing: installing.has(id) };
+}
+function broadcastTeam() {
+  broadcast('team', members.map(publicMember));
+}
+
+// ---------- 团队体检：检查、测试、安装 ----------
+function versionOf(m) {
+  return new Promise((r) => {
+    if (!m.installed) return r('');
+    exec(`${m.command} --version`, { timeout: 15000, cwd: WORKDIR }, (e, so) => r(e ? '' : String(so).trim().split('\n')[0].slice(0, 60)));
+  });
+}
+async function testMember(m) {
+  detect();
+  if (!m.installed) {
+    m.lastTest = { ok: false, text: `还没安装 ${m.name}`, at: Date.now() };
+  } else {
+    try {
+      const t = await runCLI(m, '这是一次连通测试。只回复两个字：在线', null, 120000);
+      m.lastTest = { ok: true, text: clip(t, 80), at: Date.now() };
+    } catch (e) {
+      m.lastTest = { ok: false, text: clip(e.message, 300), at: Date.now() };
+    }
+  }
+  broadcastTeam();
+  return m.lastTest;
+}
+const installing = new Set();
+function installMember(m) {
+  if (installing.has(m.id) || !/^@?[\w./-]+$/.test(m.install || '')) return false;
+  installing.add(m.id);
+  broadcastTeam();
+  const send = (line) => broadcast('install', { id: m.id, line });
+  send(`npm install -g ${m.install}`);
+  let log = '';
+  const child = spawn(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['install', '-g', m.install], { shell: process.platform === 'win32' });
+  const onData = (d) => {
+    log += d;
+    String(d).split(/\r?\n/).filter((l) => l.trim()).forEach((l) => send(l.slice(0, 300)));
+  };
+  child.stdout.on('data', onData);
+  child.stderr.on('data', onData);
+  const finish = (ok, hint) => {
+    installing.delete(m.id);
+    detect();
+    broadcast('install', { id: m.id, done: true, ok, hint });
+    broadcastTeam();
+  };
+  child.on('error', (e) => finish(false, '没找到 npm，先装 Node.js：' + e.message));
+  child.on('close', (code) => {
+    if (code === 0) return finish(true, '');
+    const perm = /EACCES|permission denied|operation not permitted/i.test(log);
+    finish(false, perm ? `权限不够。打开终端，运行：sudo npm install -g ${m.install}（会让你输开机密码，输的时候屏幕不显示，正常）` : '安装失败，看上面的日志');
+  });
+  return true;
 }
 
 const server = http.createServer(async (req, res) => {
@@ -552,6 +692,12 @@ const server = http.createServer(async (req, res) => {
       if (!fs.existsSync(f)) return sendJSON(res, 404, { error: '没找到' });
       return sendJSON(res, 200, { state: JSON.parse(fs.readFileSync(f, 'utf8')) });
     }
+    if (req.method === 'GET' && url.pathname === '/api/doctor') {
+      detect();
+      const list = await Promise.all(members.map(async (m) => ({ ...publicMember(m), version: await versionOf(m) })));
+      broadcastTeam();
+      return sendJSON(res, 200, { node: process.version, demo: DEMO_ALL, home: HOME_DIR, members: list });
+    }
     if (req.method === 'GET' && url.pathname === '/api/rules') {
       return sendJSON(res, 200, { text: readRules() });
     }
@@ -581,8 +727,15 @@ const server = http.createServer(async (req, res) => {
         onDecide(body.choice === 'backup' ? 'backup' : 'main').catch((e) => addMessage({ from: 'system', kind: 'system', text: '出错了：' + e.message }));
         return sendJSON(res, 200, { ok: true });
       }
+      if (url.pathname === '/api/test' || url.pathname === '/api/install') {
+        const m = memberById(body.id);
+        if (!m) return sendJSON(res, 404, { error: '没有这个成员' });
+        if (url.pathname === '/api/test') return sendJSON(res, 200, await testMember(m));
+        if (!installMember(m)) return sendJSON(res, 409, { error: '正在安装，或者这个成员没写安装包名' });
+        return sendJSON(res, 200, { ok: true });
+      }
       if (url.pathname === '/api/rules') {
-        fs.writeFileSync(path.join(ROOT, 'rules.md'), String(body.text || '').slice(0, 20000));
+        fs.writeFileSync(RULES_FILE, String(body.text || '').slice(0, 20000));
         return sendJSON(res, 200, { ok: true });
       }
       if (url.pathname === '/api/reset') {

@@ -13,7 +13,10 @@
       "strengths": "理解需求、拆解任务、对比取舍、把关质量",
       "weaknesses": "有时偏保守，点子不够野",
       "command": "claude",
-      "args": ["-p"]
+      "args": ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"],
+      "format": "claude-stream",
+      "install": "@anthropic-ai/claude-code",
+      "login": "claude"
     },
     {
       "id": "gemini",
@@ -25,7 +28,10 @@
       "strengths": "发散思维、想角度、出选题和创意",
       "weaknesses": "容易发散，落地细节不够",
       "command": "gemini",
-      "args": []
+      "args": [],
+      "format": "text",
+      "install": "@google/gemini-cli",
+      "login": "gemini"
     },
     {
       "id": "gpt",
@@ -33,11 +39,14 @@
       "role": "执行",
       "avatar": "GP",
       "color": "#047857",
-      "mention": ["gpt", "codex"],
+      "mention": ["gpt", "codex", "chatgpt"],
       "strengths": "执行稳、写脚本写代码、结构清楚",
       "weaknesses": "不太主动提新想法",
       "command": "codex",
-      "args": ["exec", "--skip-git-repo-check", "--output-last-message", "{OUT}", "-"]
+      "args": ["exec", "--skip-git-repo-check", "--output-last-message", "{OUT}", "-"],
+      "format": "text",
+      "install": "@openai/codex",
+      "login": "codex login"
     }
   ]
 }
