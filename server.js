@@ -290,8 +290,100 @@ function runCLI(m, prompt, onPartial, timeoutMs = TIMEOUT_MS) {
   });
 }
 
+// format "acp"：和 T3、Zed 一样，用 Agent Client Protocol 跟官方 agent 对话（比如 agy acp）
+// 一行一条 JSON-RPC 消息，走标准输入输出
+function runACP(m, prompt, onPartial, timeoutMs = TIMEOUT_MS) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(m.command, m.args, { cwd: WORKDIR, env: process.env, shell: false });
+    let nextId = 1;
+    const waiting = new Map();
+    let text = '';
+    let buf = '';
+    let err = '';
+    let finished = false;
+    const done = (e, v) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      try {
+        child.kill();
+      } catch {}
+      e ? reject(e) : resolve(v);
+    };
+    const timer = setTimeout(() => done(new Error(`${m.name} 超过 ${Math.round(timeoutMs / 1000)} 秒没回应`)), timeoutMs);
+    const send = (obj) => child.stdin.write(JSON.stringify({ jsonrpc: '2.0', ...obj }) + '\n');
+    const request = (method, params) =>
+      new Promise((res, rej) => {
+        const id = nextId++;
+        waiting.set(id, { res, rej });
+        send({ id, method, params });
+      });
+    const onMessage = (msg) => {
+      // 我们发出的请求的回复
+      if (msg.id != null && !msg.method && waiting.has(msg.id)) {
+        const w = waiting.get(msg.id);
+        waiting.delete(msg.id);
+        if (msg.error) w.rej(new Error(msg.error.message || JSON.stringify(msg.error)));
+        else w.res(msg.result);
+        return;
+      }
+      // agent 发来的通知：一段段文字
+      if (msg.method === 'session/update') {
+        const u = (msg.params && msg.params.update) || {};
+        if (u.sessionUpdate === 'agent_message_chunk' && u.content && u.content.type === 'text') {
+          text += u.content.text;
+          onPartial && onPartial(text);
+        }
+        return;
+      }
+      // agent 发来的请求：要权限一律拒绝（群聊里只要文字，不让它动你的文件），其他不支持
+      if (msg.id != null && msg.method) {
+        if (msg.method === 'session/request_permission') {
+          const opts = (msg.params && msg.params.options) || [];
+          const reject_ = opts.find((o) => String(o.kind).startsWith('reject'));
+          send({ id: msg.id, result: { outcome: reject_ ? { outcome: 'selected', optionId: reject_.optionId } : { outcome: 'cancelled' } } });
+        } else {
+          send({ id: msg.id, error: { code: -32601, message: 'not supported' } });
+        }
+      }
+    };
+    child.stdout.on('data', (d) => {
+      buf += d;
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i).trim();
+        buf = buf.slice(i + 1);
+        if (!line) continue;
+        try {
+          onMessage(JSON.parse(line));
+        } catch {}
+      }
+    });
+    child.stderr.on('data', (d) => (err += d));
+    child.stdin.on('error', () => {});
+    child.on('error', (e) => done(e.code === 'ENOENT' ? new Error(`找不到命令 ${m.command}，还没安装？`) : e));
+    child.on('close', (code) => done(new Error(clip(err.trim(), 400) || `${m.name} 提前退出了（${code}）`)));
+    (async () => {
+      await request('initialize', { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false } });
+      let s;
+      try {
+        s = await request('session/new', { cwd: WORKDIR, mcpServers: [] });
+      } catch (e) {
+        throw /auth/i.test(e.message) ? new Error(`还没登录（${e.message}）`) : e;
+      }
+      const r = await request('session/prompt', { sessionId: s.sessionId, prompt: [{ type: 'text', text: prompt }] });
+      if (r && r.stopReason === 'refusal') throw new Error('它拒绝了这个请求');
+      return text.trim();
+    })().then(
+      (t) => done(null, t),
+      (e) => done(e)
+    );
+  });
+}
+
 async function call(m, prompt, kind, onPartial) {
   if (!m.online) return demoReply(m, prompt, kind, onPartial);
+  if (m.format === 'acp') return runACP(m, prompt, onPartial);
   return runCLI(m, prompt, onPartial);
 }
 
@@ -642,7 +734,8 @@ function readBody(req) {
 }
 const ALLOWED_HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);
 function publicMember(m) {
-  const { id, name, role, avatar, color, strengths, weaknesses, online, installed, install, login, lastTest } = m;
+  const { id, name, role, avatar, color, strengths, weaknesses, online, installed, login, lastTest } = m;
+  const install = m.installShell || m.installShellWin || m.install;
   return { id, name, role, avatar, color, strengths, weaknesses, online, installed, install, login, lastTest: lastTest || null, installing: installing.has(id) };
 }
 function broadcastTeam() {
@@ -662,7 +755,8 @@ async function testMember(m) {
     m.lastTest = { ok: false, text: `还没安装 ${m.name}`, at: Date.now() };
   } else {
     try {
-      const t = await runCLI(m, '这是一次连通测试。只回复两个字：在线', null, 120000);
+      const q = '这是一次连通测试。只回复两个字：在线';
+      const t = m.format === 'acp' ? await runACP(m, q, null, 120000) : await runCLI(m, q, null, 120000);
       m.lastTest = { ok: true, text: clip(t, 80), at: Date.now() };
     } catch (e) {
       m.lastTest = { ok: false, text: clip(e.message, 300), at: Date.now() };
@@ -673,13 +767,19 @@ async function testMember(m) {
 }
 const installing = new Set();
 function installMember(m) {
-  if (installing.has(m.id) || !/^@?[\w./-]+$/.test(m.install || '')) return false;
+  const win = process.platform === 'win32';
+  const script = win ? m.installShellWin : m.installShell; // 官方安装脚本（比如 Antigravity），写死在 team.json 里
+  if (installing.has(m.id) || (!script && !/^@?[\w./-]+$/.test(m.install || ''))) return false;
   installing.add(m.id);
   broadcastTeam();
   const send = (line) => broadcast('install', { id: m.id, line });
-  send(`npm install -g ${m.install}`);
+  send(script || `npm install -g ${m.install}`);
   let log = '';
-  const child = spawn(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['install', '-g', m.install], { shell: process.platform === 'win32' });
+  const child = script
+    ? win
+      ? spawn('powershell', ['-NoProfile', '-Command', script])
+      : spawn('bash', ['-c', script])
+    : spawn(win ? 'npm.cmd' : 'npm', ['install', '-g', m.install], { shell: win });
   const onData = (d) => {
     log += d;
     String(d).split(/\r?\n/).filter((l) => l.trim()).forEach((l) => send(l.slice(0, 300)));
@@ -696,7 +796,7 @@ function installMember(m) {
   child.on('close', (code) => {
     if (code === 0) return finish(true, '');
     const perm = /EACCES|permission denied|operation not permitted/i.test(log);
-    finish(false, perm ? `权限不够。打开终端，运行：sudo npm install -g ${m.install}（会让你输开机密码，输的时候屏幕不显示，正常）` : '安装失败，看上面的日志');
+    finish(false, perm && !script ? `权限不够。打开终端，运行：sudo npm install -g ${m.install}（会让你输开机密码，输的时候屏幕不显示，正常）` : '安装失败，看上面的日志');
   });
   return true;
 }

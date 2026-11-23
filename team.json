@@ -9,11 +9,20 @@
       "role": "项目经理",
       "avatar": "Cl",
       "color": "#C2410C",
-      "mention": ["claude", "克劳德"],
+      "mention": [
+        "claude",
+        "克劳德"
+      ],
       "strengths": "理解需求、拆解任务、对比取舍、把关质量",
       "weaknesses": "有时偏保守，点子不够野",
       "command": "claude",
-      "args": ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"],
+      "args": [
+        "-p",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--include-partial-messages"
+      ],
       "format": "claude-stream",
       "install": "@anthropic-ai/claude-code",
       "login": "claude"
@@ -24,14 +33,23 @@
       "role": "出点子",
       "avatar": "Ge",
       "color": "#1D4ED8",
-      "mention": ["gemini"],
+      "mention": [
+        "gemini",
+        "antigravity",
+        "agy",
+        "谷歌"
+      ],
       "strengths": "发散思维、想角度、出选题和创意",
       "weaknesses": "容易发散，落地细节不够",
-      "command": "gemini",
-      "args": [],
-      "format": "text",
-      "install": "@google/gemini-cli",
-      "login": "gemini"
+      "command": "agy",
+      "args": [
+        "acp"
+      ],
+      "format": "acp",
+      "login": "agy",
+      "installShell": "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+      "installShellWin": "irm https://antigravity.google/cli/install.ps1 | iex",
+      "note": "用 Gemini 会员（Google AI Pro）登录 Antigravity CLI。Gemini CLI 已不支持会员登录。"
     },
     {
       "id": "gpt",
@@ -39,11 +57,21 @@
       "role": "执行",
       "avatar": "GP",
       "color": "#047857",
-      "mention": ["gpt", "codex", "chatgpt"],
+      "mention": [
+        "gpt",
+        "codex",
+        "chatgpt"
+      ],
       "strengths": "执行稳、写脚本写代码、结构清楚",
       "weaknesses": "不太主动提新想法",
       "command": "codex",
-      "args": ["exec", "--skip-git-repo-check", "--output-last-message", "{OUT}", "-"],
+      "args": [
+        "exec",
+        "--skip-git-repo-check",
+        "--output-last-message",
+        "{OUT}",
+        "-"
+      ],
       "format": "text",
       "install": "@openai/codex",
       "login": "codex login"
