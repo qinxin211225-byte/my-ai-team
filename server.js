@@ -93,7 +93,7 @@ function readRules() {
 
 // ---------- 状态 ----------
 function freshState() {
-  return { messages: [], nodes: [], pending: null, seq: 0, row: 0, demoStage: 0, createdAt: new Date().toISOString() };
+  return { messages: [], nodes: [], pending: null, seq: 0, row: 0, demoStage: 0, active: false, title: '', createdAt: new Date().toISOString() };
 }
 let state = freshState();
 try {
@@ -154,6 +154,11 @@ function setTyping(id, on) {
 function setBusy(b) {
   busy = b;
   broadcast('busy', b);
+}
+function setTitle(t) {
+  state.title = clip(String(t).trim(), 20);
+  broadcast('title', state.title);
+  save();
 }
 function setPending(p) {
   state.pending = p;
@@ -405,15 +410,18 @@ ${rules ? '公司规章（所有人都要遵守）：\n' + rules + '\n' : ''}
 4. 你自己也可以干活：把任务派给 "${pm.id}"。
 5. 老板只是聊天、提问或者事情很简单时，直接 reply，不要硬派活。
 6. 老板插话提了意见，要认真吸收，必要时重新派活。
+7. 少说话：老板只是在 @ 别的成员、跟他们聊天，或者成员已经回答清楚了，没有需要你接的话，就输出 wait，不要每次都出来总结一句。
+8. 接到一个新需求、第一次派活时，在 dispatch 里加上 "task"：给这次任务起一个 10 个字以内的名字。
 
 到目前为止的群聊记录：
 ${transcript() || '（空）'}
 
-现在轮到你。只输出一个 JSON 对象，不要输出任何别的文字。从下面四种里选一种：
-{"type":"dispatch","say":"你在群里说的话，可以 @成员","tasks":[{"to":"成员id","title":"流程图上的短标题，10个字以内","prompt":"给这个成员的完整、具体的指令"}]}
+现在轮到你。只输出一个 JSON 对象，不要输出任何别的文字。从下面五种里选一种：
+{"type":"dispatch","task":"任务名（只在新需求第一次派活时写）","say":"你在群里说的话，可以 @成员","tasks":[{"to":"成员id","title":"流程图上的短标题，10个字以内","prompt":"给这个成员的完整、具体的指令"}]}
 {"type":"decision","say":"你在群里说的话","card":{"title":"推荐方案，一句话","adopted":[{"from":"成员id","point":"采纳了他的什么"}],"rejected":[{"item":"没采纳的东西","reason":"原因"}],"backup":"备选方案，一句话"}}
 {"type":"reply","say":"你在群里说的话"}
-{"type":"done","say":"交付给老板的最终结果，完整写出来"}`;
+{"type":"done","say":"交付给老板的最终结果，完整写出来"}
+{"type":"wait"}`;
 }
 
 function agentPrompt(m, instruction, from) {
@@ -430,7 +438,7 @@ ${transcript(12, 800) || '（空）'}
 ${from === 'me' ? '老板刚在群里直接找你：' : `项目经理 ${pm.name} 派给你的任务：`}
 ${instruction}
 
-要求：直接给出结果，用中文，简洁清楚，像在工作群里回复同事。发挥你最擅长的部分。除非任务明确要求，不要创建或修改任何文件。`;
+要求：直接给出结果，用中文，简洁清楚，像在工作群里回复同事。发挥你最擅长的部分。只说真实发生的事：还没定的事不要说"定了"，没做的事不要说"做完了"。除非任务明确要求，不要创建或修改任何文件。`;
 }
 
 function parseAction(text) {
@@ -472,8 +480,9 @@ function markHealth(m, ok, err) {
 }
 
 // ---------- 干活 ----------
-async function runMember(m, prompt, title, row) {
-  const node = addNode({ lane: m.id, title, status: 'running', row });
+async function runMember(m, prompt, title, row, withNode = true) {
+  // 闲聊不进流程图：用一个不广播的假节点占位
+  const node = withNode ? addNode({ lane: m.id, title, status: 'running', row }) : { id: -1 };
   setTyping(m.id, true);
   let msg = null;
   let last = 0;
@@ -522,6 +531,13 @@ async function pmLoop() {
     const say = a.say ? String(a.say) : '';
 
     if (a.type === 'dispatch' && Array.isArray(a.tasks) && a.tasks.length) {
+      if (!state.active) {
+        // 新需求开始：把老板刚才那句话记成"说需求"
+        const lastMe = [...state.messages].reverse().find((x) => x.from === 'me');
+        if (lastMe && !state.nodes.some((n) => n.msgId === lastMe.id)) addNode({ lane: 'me', title: '说需求', status: 'done', msgId: lastMe.id });
+        state.active = true;
+      }
+      if (a.task) setTitle(a.task);
       const msg = addMessage({ from: pm.id, text: say || '我来派一下活。', demo: !pm.online });
       addNode({ lane: pm.id, title: '拆活、派活', status: 'done', msgId: msg.id });
       const row = ++state.row;
@@ -544,10 +560,13 @@ async function pmLoop() {
     if (a.type === 'done') {
       const msg = addMessage({ from: pm.id, kind: 'done', text: say || '完成了。', demo: !pm.online });
       addNode({ lane: pm.id, title: '终审、汇总给你', status: 'done', msgId: msg.id });
+      state.active = false;
+      save();
       return;
     }
-    const msg = addMessage({ from: pm.id, text: say || raw, demo: !pm.online });
-    addNode({ lane: pm.id, title: '回复', status: 'done', msgId: msg.id });
+    if (a.type === 'wait' || (!say && a.type !== 'reply')) return; // 没什么要说的，就不说
+    // 普通回复只进群聊，不进流程图
+    addMessage({ from: pm.id, text: say || raw, demo: !pm.online });
     return;
   }
   addMessage({ from: 'system', kind: 'system', text: '连续自动跑了好几轮，先停一下。你说一句，大家接着干。' });
@@ -570,22 +589,26 @@ async function runPM() {
 }
 
 async function onUserText(text) {
-  const isFirst = !state.messages.some((m) => m.from === 'me');
   const msg = addMessage({ from: 'me', text });
-  const mentioned = mentionsIn(text).filter((m) => m.id !== pm.id);
-  const title = clip(isFirst ? '说需求' : mentioned.length ? '插话 @' + mentioned.map((m) => m.name).join(' @') : '提意见', 14);
+  const all = mentionsIn(text);
+  const mentioned = all.filter((m) => m.id !== pm.id);
+  const callsPM = all.some((m) => m.id === pm.id);
+  const title = clip(mentioned.length ? '插话 @' + mentioned.map((m) => m.name).join(' @') : '提意见', 14);
+  // 流程图只记"干活"：任务进行中的插话/意见才进图，闲聊不进
   if (state.pending) {
     // 拍板卡没点按钮，直接说了话：这一格就变成"提意见/插话"
     patchMessage(state.pending.msgId, { resolved: '你提了意见' });
     patchNode(state.pending.nodeId, { status: 'done', title, dashed: true, boss: false, msgId: msg.id });
     setPending(null);
-  } else {
-    addNode({ lane: 'me', title, status: 'done', msgId: msg.id, dashed: !isFirst });
+  } else if (state.active) {
+    addNode({ lane: 'me', title, status: 'done', msgId: msg.id, dashed: true });
   }
   if (mentioned.length) {
     const row = ++state.row;
-    await Promise.all(mentioned.map((m) => runMember(m, agentPrompt(m, text, 'me'), '回应插话', row)));
+    await Promise.all(mentioned.map((m) => runMember(m, agentPrompt(m, text, 'me'), '回应插话', row, state.active)));
   }
+  // 只 @ 了别的成员、又没有进行中的任务：项目经理不用出来接话
+  if (mentioned.length && !callsPM && !state.active) return;
   await runPM();
 }
 
@@ -673,6 +696,7 @@ function demoPM() {
   if (s === 0)
     return {
       type: 'dispatch',
+      task: '下周视频选题',
       say: `收到，我拆一下：@${ideas.name} 和 @${exec_.name} 各自独立出 3 个选题，我逐条对比、合成一份给你拍板。`,
       tasks: [
         { to: ideas.id, title: '出 3 个选题', prompt: '根据老板的需求，独立出 3 个选题。' },
@@ -822,7 +846,7 @@ const server = http.createServer(async (req, res) => {
             const s = JSON.parse(fs.readFileSync(path.join(HISTORY_DIR, f), 'utf8'));
             const first = (s.messages || []).find((m) => m.from === 'me');
             const done = (s.messages || []).some((m) => m.kind === 'done');
-            return { id: f.replace(/\.json$/, ''), title: first ? first.text : '（空任务）', time: s.createdAt, done };
+            return { id: f.replace(/\.json$/, ''), title: s.title || (first ? first.text : '（空任务）'), time: s.createdAt, done };
           } catch {
             return null;
           }

@@ -279,7 +279,7 @@ function memberState(m){
   if (m.lastTest && !m.lastTest.ok) return ['warn','没接通'];
   return ['on','在线'];
 }
-function taskTitle(st){ const f = (st.messages || []).find(m => m.from === 'me'); return f ? f.text : '新任务'; }
+function taskTitle(st){ if (st.title) return st.title; const f = (st.messages || []).find(m => m.from === 'me'); return f ? f.text : '新任务'; }
 function taskStatus(st, live){
   if (!st.messages || !st.messages.length) return ['idle','还没开始'];
   if (st.pending) return ['wait','等你拍板'];
@@ -433,6 +433,7 @@ function connect(){
   es.addEventListener('busy', live(b => { S.busy = b; renderSide(); renderTop(); }));
   es.addEventListener('pending', live(p => { S.live.pending = p; if (!S.viewing) renderChat(); renderSide(); renderTop(); }));
   es.addEventListener('reset', () => { S.viewing = null; load(); });
+  es.addEventListener('title', live(t => { S.live.title = t; renderSide(); renderTop(); }));
   es.addEventListener('team', live(ms => { S.team.members = ms; renderSide(); renderTop(); renderAt(); renderDoctor(); }));
   es.addEventListener('install', live(e => {
     (S.logs[e.id] = S.logs[e.id] || []);
